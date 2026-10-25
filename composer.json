@@ -1,0 +1,68 @@
+{
+    "name": "aisdk/mcp",
+    "description": "Stateless Model Context Protocol (2026-07-28) client and server for the PHP AI SDK.",
+    "license": "MIT",
+    "keywords": [
+        "agents",
+        "ai",
+        "aisdk",
+        "mcp",
+        "model-context-protocol"
+    ],
+    "homepage": "https://github.com/phpaisdk/mcp",
+    "support": {
+        "issues": "https://github.com/phpaisdk/mcp/issues",
+        "source": "https://github.com/phpaisdk/mcp"
+    },
+    "authors": [
+        {
+            "name": "Moiz Haider",
+            "email": "hi@moizhaider.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "aisdk/core": "^0.8.0",
+        "psr/http-client": "^1.0",
+        "psr/http-factory": "^1.1",
+        "psr/http-message": "^2.0",
+        "psr/http-server-handler": "^1.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.18",
+        "nyholm/psr7": "^1.8",
+        "pestphp/pest": "^3.0 || ^4.0",
+        "phpstan/phpstan": "^2.0",
+        "rector/rector": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "AiSdk\\Mcp\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "AiSdk\\Mcp\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "lint": "vendor/bin/pint --test",
+        "format": "vendor/bin/pint",
+        "analyze": "vendor/bin/phpstan analyze --memory-limit=512M",
+        "refactor:dry": "vendor/bin/rector process --dry-run",
+        "refactor": "vendor/bin/rector process",
+        "test": "vendor/bin/pest",
+        "test:all": [
+            "@lint",
+            "@analyze",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
+}
