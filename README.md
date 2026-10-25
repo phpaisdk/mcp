@@ -1,0 +1,134 @@
+# aisdk/mcp
+
+<a href="https://github.com/phpaisdk/mcp/actions"><img alt="GitHub Workflow Status" src="https://img.shields.io/github/actions/workflow/status/phpaisdk/mcp/tests.yml?branch=main&label=Tests"></a>
+<a href="https://packagist.org/packages/aisdk/mcp"><img alt="Total Downloads" src="https://img.shields.io/packagist/dt/aisdk/mcp"></a>
+<a href="https://packagist.org/packages/aisdk/mcp"><img alt="Latest Version" src="https://img.shields.io/packagist/v/aisdk/mcp"></a>
+<a href="https://packagist.org/packages/aisdk/mcp"><img alt="License" src="https://img.shields.io/packagist/l/aisdk/mcp"></a>
+<a href="https://whyphp.dev"><img src="https://img.shields.io/badge/Why_PHP-in_2026-7A86E8?style=flat-square&labelColor=18181b" alt="Why PHP in 2026"></a>
+
+------
+
+Stateless [Model Context Protocol](https://modelcontextprotocol.io) client and server for the PHP AI SDK, implementing revision **2026-07-28**.
+
+- **Server**: expose SDK tools and resources to any MCP client over Streamable HTTP (a PSR-15 handler) or stdio.
+- **Client**: connect to MCP servers and hand their tools to `Generate::text()` as ordinary SDK tools, so they work with every provider.
+- **Stateless by design**: no handshake and no sessions. Every request carries its protocol version and capabilities, so any server instance can answer any request and there is nothing to store between calls.
+- **No dependency on another MCP SDK**: only `aisdk/core` and PSR interfaces.
+
+## Installation
+
+```bash
+composer require aisdk/mcp
+```
+
+## Use remote MCP tools with a model
+
+```php
+use AiSdk\Generate;
+use AiSdk\Mcp\Client\Client;
+use AiSdk\OpenAI;
+
+$mcp = Client::http('https://example.com/mcp', $psr18, $requestFactory, $streamFactory, [
+    'Authorization' => 'Bearer '.$token,
+]);
+
+$result = Generate::text('What is in the intro doc?')
+    ->model(OpenAI::model('gpt-5.5'))
+    ->tools(...$mcp->tools(prefix: 'docs_'))
+    ->maxSteps(5)
+    ->run();
+```
+
+Over stdio:
+
+```php
+$mcp = Client::stdio(['php', 'server.php']);
+```
+
+Other client calls:
+
+```php
+$mcp->discover();                       // versions, capabilities, instructions
+$mcp->listTools();                      // cached for the server's ttlMs
+$mcp->callTool('search', ['query' => 'streaming']);
+$mcp->listResources();
+$mcp->readResource('docs://intro');
+```
+
+Tool execution errors (`isError: true`) are returned to the model as text so it can recover. Protocol errors raise `ProtocolException`.
+
+### Servers that ask for input
+
+A server can pause a `tools/call` and ask for input (elicitation). Register a handler and the client completes the round trip for you, echoing the server's opaque `requestState` exactly:
+
+```php
+$mcp->onInputRequired(function (string $key, string $method, array $params): array {
+    return ['action' => 'accept', 'content' => ['name' => 'octocat']];
+});
+```
+
+Without a handler, a request for input raises `InputRequiredException`.
+
+## Build an MCP server
+
+Any `AiSdk\Tool` is an MCP tool.
+
+```php
+use AiSdk\Schema;
+use AiSdk\Tool;
+use AiSdk\Mcp\Server\HttpHandler;
+use AiSdk\Mcp\Server\Server;
+use AiSdk\Mcp\Server\TextResource;
+
+$search = Tool::make('search_docs', 'Search the documentation')
+    ->input(Schema::object('search_input', properties: [
+        Schema::string('query', 'What to look for')->required(),
+    ]))
+    ->run(fn (array $input): array => $docs->search($input['query']));
+
+$server = Server::make('my-docs', '1.0.0')
+    ->instructions('Search before answering questions about the SDK.')
+    ->tool($search, ['readOnlyHint' => true])
+    ->resource(TextResource::text('docs://intro', 'intro', fn () => file_get_contents('intro.md')))
+    ->cache(ttlMs: 300_000);
+```
+
+Streamable HTTP (a PSR-15 `RequestHandlerInterface`, so it mounts in Laravel, Symfony, Slim or plain PHP):
+
+```php
+$handler = new HttpHandler($server, $psr17ResponseFactory, $psr17StreamFactory, allowedOrigins: ['https://app.example.com']);
+
+// Route POST /mcp to $handler->handle($serverRequest).
+```
+
+stdio:
+
+```php
+(new StdioServer($server))->run(); // reads STDIN, writes STDOUT; log to STDERR only
+```
+
+Server behaviour worth knowing:
+
+- Tools are listed in deterministic order, with `ttlMs`/`cacheScope` cache hints.
+- Invalid tool input is returned as an execution error the model can correct. Exceptions thrown by a handler are reported generically; call `exposeToolErrors()` to include their messages.
+- The HTTP binding validates `Origin` (same host by default), `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` against the body, and answers `405` to `GET`/`DELETE`.
+
+## Compatibility
+
+| | |
+|---|---|
+| Protocol | `2026-07-28` |
+| Transports | Streamable HTTP (client and server), stdio (client and server), in-memory |
+| Servers using the older `initialize` handshake | Detected and reported with `LegacyServerException`; not supported yet |
+| Roots, Sampling, Logging | Deprecated by the spec; not implemented |
+| Not implemented yet | `subscriptions/listen`, prompts, the Tasks and MCP Apps extensions, OAuth discovery |
+
+## Development
+
+```bash
+composer test:all   # pint, phpstan (level 8), pest
+```
+
+## License
+
+MIT
