@@ -22,6 +22,8 @@ final class HttpTransport implements Transport
     /** @var (callable(array<string, mixed>): void)|null */
     private $onNotification;
 
+    private ?string $sessionId = null;
+
     /**
      * @param  array<string, string>  $headers  Extra headers on every request (e.g. Authorization).
      * @param  (callable(array<string, mixed>): void)|null  $onNotification  Receives request-scoped notifications such as progress.
@@ -35,6 +37,7 @@ final class HttpTransport implements Transport
         private readonly array $headers = [],
         ?callable $onNotification = null,
         private readonly int $maxResponseBytes = 10_485_760,
+        private readonly ?string $legacyVersion = null,
     ) {
         $this->onNotification = $onNotification;
     }
@@ -66,6 +69,14 @@ final class HttpTransport implements Transport
             $request = $request->withHeader('Mcp-Param-' . $headerName, HeaderEncoding::encode($value));
         }
 
+        if ($this->legacyVersion !== null) {
+            $request = $request->withoutHeader('Mcp-Method')->withoutHeader('Mcp-Name')
+                ->withHeader('MCP-Protocol-Version', $this->legacyVersion);
+            if ($this->sessionId !== null) {
+                $request = $request->withHeader('Mcp-Session-Id', $this->sessionId);
+            }
+        }
+
         foreach ($this->headers as $headerName => $value) {
             $request = $request->withHeader($headerName, $value);
         }
@@ -74,6 +85,17 @@ final class HttpTransport implements Transport
             $response = $this->http->sendRequest($request);
         } catch (ClientExceptionInterface $e) {
             throw new McpException('MCP HTTP transport error: ' . $e->getMessage(), ['url' => $this->url], $e);
+        }
+
+        if ($this->legacyVersion !== null && $method === 'initialize' && $response->getStatusCode() === 200) {
+            $session = $response->getHeaderLine('Mcp-Session-Id');
+            if ($session !== '' && (strlen($session) > 1024 || preg_match('/[^\x21-\x7e]/', $session))) {
+                throw new McpException('Invalid MCP session id.');
+            }
+            $this->sessionId = $session === '' ? null : $session;
+        }
+        if (! array_key_exists('id', $message) && $response->getStatusCode() === 202) {
+            return [];
         }
 
         return $this->parse($response, $message['id'] ?? null);
@@ -94,6 +116,10 @@ final class HttpTransport implements Transport
         $decoded = json_decode($this->readBounded($response), true);
 
         if (is_array($decoded) && ($decoded['jsonrpc'] ?? null) === '2.0' && (isset($decoded['result']) || isset($decoded['error']))) {
+            if (($decoded['id'] ?? null) !== $id) {
+                throw new McpException('MCP response id did not match the request.');
+            }
+
             return $decoded;
         }
 

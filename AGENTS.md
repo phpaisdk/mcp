@@ -10,7 +10,7 @@ Stateless Model Context Protocol client and server (revision **2026-07-28**) for
 
 ## Protocol rules you must not break
 
-- **No sessions, no handshake.** Never add `initialize`, `Mcp-Session-Id`, or per-connection state. Every request carries `_meta` with `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities`.
+- **Default protocol: no sessions, no handshake.** Keep `initialize`, `Mcp-Session-Id`, and per-connection state out of the default client/server. The explicitly selected `Client::legacyHttp()` compatibility path may use them; never automatically retry a tool call across protocol versions. Every request carries `_meta` with `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities`.
 - Results always carry `resultType` (`complete` or `input_required`). A missing `resultType` from a peer means `complete`.
 - Servers never send requests to clients. Input from the client travels via `input_required` results and `inputResponses` on a retry with a **new** JSON-RPC id; `requestState` is opaque and echoed exactly.
 - Error codes: `-32020` header mismatch, `-32021` missing capability, `-32022` unsupported version (`data.supported`/`data.requested`). Do not emit other codes in `-32020..-32099`.

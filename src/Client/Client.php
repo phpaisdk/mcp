@@ -55,6 +55,20 @@ final class Client
         return new self(new HttpTransport($url, $http, $requestFactory, $streamFactory, $headers, $onNotification));
     }
 
+    /** Explicit compatibility path; the default http() client remains stateless.
+     * @param array<string, string> $headers
+     */
+    public static function legacyHttp(
+        string $url,
+        ClientInterface $http,
+        RequestFactoryInterface $requestFactory,
+        StreamFactoryInterface $streamFactory,
+        array $headers = [],
+        string $version = '2025-11-25',
+    ): self {
+        return new self(new LegacyTransport(new HttpTransport($url, $http, $requestFactory, $streamFactory, $headers, legacyVersion: $version), $version));
+    }
+
     /**
      * @param  list<string>  $command
      * @param  array<string, string>|null  $env
