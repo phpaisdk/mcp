@@ -18,6 +18,13 @@ Stateless Model Context Protocol client and server (revision **2026-07-28**) for
 - Roots, Sampling and Logging are deprecated: do not implement them.
 - Spec source of truth: https://modelcontextprotocol.io/specification/2026-07-28 (every page is also available as `.md`).
 
+## Security rules
+
+- Never inherit the parent environment into a stdio child by default; keep `StdioTransport::environment()` allow-list based.
+- Every read from a peer is size-bounded (`maxResponseBytes`, `maxBodyBytes`, `maxLineBytes`). Do not add unbounded reads or buffers.
+- `HttpHandler` must run the `authenticator` before parsing the body. Do not log request bodies or `Authorization` headers.
+- Tool errors returned to the model are generic unless `exposeToolErrors()` was called.
+
 ## Layout
 
 | Path | Purpose |

@@ -113,6 +113,19 @@ Server behaviour worth knowing:
 - Invalid tool input is returned as an execution error the model can correct. Exceptions thrown by a handler are reported generically; call `exposeToolErrors()` to include their messages.
 - The HTTP binding validates `Origin` (same host by default), `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` against the body, and answers `405` to `GET`/`DELETE`.
 
+## Security
+
+MCP servers and clients handle untrusted input in both directions, so the defaults are conservative:
+
+- **stdio servers do not inherit your environment.** `Client::stdio()` passes only `PATH`, `HOME` and similar basics plus the `env` you give it, because your environment usually holds API keys. Pass `inheritEnvironment: true` only for servers you fully trust.
+- **Response size limits.** The HTTP client refuses responses and event streams over 10 MiB (`maxResponseBytes`).
+- **Request size limits.** `HttpHandler` answers `413` above 1 MiB (`maxBodyBytes`), and `StdioServer` rejects lines above 4 MiB.
+- **Authentication hook.** `HttpHandler` takes an `authenticator` closure that can return a `401` response before any message is processed. Always set one on a public endpoint.
+- **Origin validation** is on by default (same host), which blocks DNS-rebinding attacks from browsers.
+- **Tool errors are generic by default.** Exceptions from tool handlers are not sent to the model unless you call `exposeToolErrors()`.
+- **Redirects.** Pass a PSR-18 client with redirects disabled for MCP endpoints, so credentials in custom headers cannot follow a redirect to another host.
+- **Treat tool descriptions and results from third-party servers as untrusted input.** They can contain prompt-injection text. Prefer allow-listing tools (`$mcp->tools(only: ['search'])`) and require human approval for tools with side effects.
+
 ## Compatibility
 
 | | |
