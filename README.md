@@ -132,7 +132,7 @@ MCP servers and clients handle untrusted input in both directions, so the defaul
 |---|---|
 | Protocol | `2026-07-28` |
 | Transports | Streamable HTTP (client and server), stdio (client and server), in-memory |
-| Servers using the older `initialize` handshake | Detected and reported with `LegacyServerException`; not supported yet |
+| Servers using the older `initialize` handshake | Opt-in `Client::legacyHttp()` for Streamable HTTP; default clients remain stateless |
 | Roots, Sampling, Logging | Deprecated by the spec; not implemented |
 | Not implemented yet | `subscriptions/listen`, prompts, the Tasks and MCP Apps extensions, OAuth discovery |
 
@@ -145,3 +145,7 @@ composer test:all   # pint, phpstan (level 8), pest
 ## License
 
 MIT
+
+### Upcoming 0.10.0 legacy HTTP compatibility
+
+Use `Client::legacyHttp($url, $http, $requestFactory, $streamFactory)` for initialize-based peers. It supports explicit revisions `2025-11-25` (default), `2025-06-18`, and `2025-03-26`. Initialization must return the configured version. The client sends `notifications/initialized`, preserves the session header and never automatically replays a failed tool call. Default `Client::http()` behavior is unchanged. Legacy stdio, old GET/SSE transport, server-initiated requests and automatic session recovery are not supported.
