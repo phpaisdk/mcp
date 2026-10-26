@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AiSdk\Mcp\Server;
 
 use AiSdk\Mcp\Exceptions\ProtocolException;
+use AiSdk\Mcp\Protocol;
 
 /**
  * stdio binding: newline-delimited JSON-RPC over a pair of streams.
@@ -14,7 +15,10 @@ use AiSdk\Mcp\Exceptions\ProtocolException;
  */
 final class StdioServer
 {
-    public function __construct(private readonly Server $server) {}
+    public function __construct(
+        private readonly Server $server,
+        private readonly int $maxLineBytes = 4_194_304,
+    ) {}
 
     /**
      * Serve until the input stream reaches EOF.
@@ -24,7 +28,18 @@ final class StdioServer
      */
     public function run($input = STDIN, $output = STDOUT): void
     {
-        while (($line = fgets($input)) !== false) {
+        while (($line = stream_get_line($input, $this->maxLineBytes + 1, "\n")) !== false) {
+            if (strlen($line) > $this->maxLineBytes) {
+                // Drain the rest of the oversized message, then report it.
+                while (strlen((string) stream_get_line($input, $this->maxLineBytes + 1, "\n")) > $this->maxLineBytes) {
+                }
+
+                fwrite($output, json_encode(['jsonrpc' => '2.0', 'id' => null, 'error' => ['code' => Protocol::INVALID_REQUEST, 'message' => 'Message too large.']], JSON_THROW_ON_ERROR) . "\n");
+                fflush($output);
+
+                continue;
+            }
+
             $line = trim($line);
 
             if ($line === '') {

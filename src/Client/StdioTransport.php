@@ -25,7 +25,9 @@ final class StdioTransport implements Transport
 
     /**
      * @param  list<string>  $command
-     * @param  array<string, string>|null  $env  Null inherits the parent environment.
+     * @param  array<string, string>|null  $env  Extra variables for the server process. The parent environment is NOT
+     *                                           inherited (it usually holds API keys); only a minimal safe set is passed
+     *                                           unless $inheritEnvironment is true.
      * @param  (callable(array<string, mixed>): void)|null  $onNotification
      */
     public function __construct(
@@ -34,6 +36,7 @@ final class StdioTransport implements Transport
         private readonly ?array $env = null,
         private readonly float $timeoutSeconds = 60.0,
         ?callable $onNotification = null,
+        private readonly bool $inheritEnvironment = false,
     ) {
         $this->onNotification = $onNotification;
     }
@@ -115,13 +118,35 @@ final class StdioTransport implements Transport
         }
 
         $stderr = defined('STDERR') ? STDERR : ['file', '/dev/null', 'w'];
-        $process = proc_open($this->command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => $stderr], $this->pipes, $this->cwd, $this->env);
+        $process = proc_open($this->command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => $stderr], $this->pipes, $this->cwd, $this->environment());
 
         if (! is_resource($process)) {
             throw new McpException('Could not start the MCP server process: ' . implode(' ', $this->command));
         }
 
         $this->process = $process;
+    }
+
+    /**
+     * @return array<string, string>|null Null means inherit the full parent environment (explicit opt-in only).
+     */
+    private function environment(): ?array
+    {
+        if ($this->inheritEnvironment) {
+            return $this->env === null ? null : array_replace(getenv(), $this->env);
+        }
+
+        $safe = [];
+
+        foreach (['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'ComSpec', 'PATHEXT'] as $name) {
+            $value = getenv($name);
+
+            if (is_string($value)) {
+                $safe[$name] = $value;
+            }
+        }
+
+        return array_replace($safe, $this->env ?? []);
     }
 
     private function readLine(float $deadline): string

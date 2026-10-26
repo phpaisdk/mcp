@@ -59,9 +59,9 @@ final class Client
      * @param  list<string>  $command
      * @param  array<string, string>|null  $env
      */
-    public static function stdio(array $command, ?string $cwd = null, ?array $env = null, float $timeoutSeconds = 60.0): self
+    public static function stdio(array $command, ?string $cwd = null, ?array $env = null, float $timeoutSeconds = 60.0, bool $inheritEnvironment = false): self
     {
-        return new self(new StdioTransport($command, $cwd, $env, $timeoutSeconds));
+        return new self(new StdioTransport($command, $cwd, $env, $timeoutSeconds, null, $inheritEnvironment));
     }
 
     /**

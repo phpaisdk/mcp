@@ -8,7 +8,6 @@ use AiSdk\Mcp\Exceptions\LegacyServerException;
 use AiSdk\Mcp\Exceptions\McpException;
 use AiSdk\Mcp\Protocol;
 use AiSdk\Mcp\Support\HeaderEncoding;
-use AiSdk\Utils\Stream\SseParser;
 use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestFactoryInterface;
@@ -26,6 +25,7 @@ final class HttpTransport implements Transport
     /**
      * @param  array<string, string>  $headers  Extra headers on every request (e.g. Authorization).
      * @param  (callable(array<string, mixed>): void)|null  $onNotification  Receives request-scoped notifications such as progress.
+     * @param  int  $maxResponseBytes  Largest response (JSON body or whole event stream) accepted from a server.
      */
     public function __construct(
         private readonly string $url,
@@ -34,6 +34,7 @@ final class HttpTransport implements Transport
         private readonly StreamFactoryInterface $streamFactory,
         private readonly array $headers = [],
         ?callable $onNotification = null,
+        private readonly int $maxResponseBytes = 10_485_760,
     ) {
         $this->onNotification = $onNotification;
     }
@@ -90,7 +91,7 @@ final class HttpTransport implements Transport
             return $this->fromEventStream($response, $id);
         }
 
-        $decoded = json_decode((string) $response->getBody(), true);
+        $decoded = json_decode($this->readBounded($response), true);
 
         if (is_array($decoded) && ($decoded['jsonrpc'] ?? null) === '2.0' && (isset($decoded['result']) || isset($decoded['error']))) {
             return $decoded;
@@ -118,8 +119,8 @@ final class HttpTransport implements Transport
      */
     private function fromEventStream(ResponseInterface $response, mixed $id): array
     {
-        foreach (SseParser::parseStream($response->getBody()) as $frame) {
-            $decoded = json_decode($frame['data'], true);
+        foreach ($this->sseFrames($response) as $data) {
+            $decoded = json_decode($data, true);
 
             if (! is_array($decoded)) {
                 continue;
@@ -135,5 +136,69 @@ final class HttpTransport implements Transport
         }
 
         throw new McpException('The MCP event stream ended without a response.');
+    }
+
+    /**
+     * Read the body, refusing anything larger than the configured limit.
+     */
+    private function readBounded(ResponseInterface $response): string
+    {
+        $body = $response->getBody();
+        $size = $body->getSize();
+
+        if ($size !== null && $size > $this->maxResponseBytes) {
+            throw new McpException("The MCP server response ({$size} bytes) exceeds the {$this->maxResponseBytes} byte limit.");
+        }
+
+        $data = '';
+
+        while (! $body->eof()) {
+            $data .= $body->read(65536);
+
+            if (strlen($data) > $this->maxResponseBytes) {
+                throw new McpException("The MCP server response exceeds the {$this->maxResponseBytes} byte limit.");
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * Yield the data payload of each SSE event, enforcing the byte budget over the whole stream.
+     *
+     * @return \Generator<int, string>
+     */
+    private function sseFrames(ResponseInterface $response): \Generator
+    {
+        $body = $response->getBody();
+        $buffer = '';
+        $total = 0;
+
+        while (! $body->eof()) {
+            $chunk = $body->read(8192);
+            $total += strlen($chunk);
+
+            if ($total > $this->maxResponseBytes) {
+                throw new McpException("The MCP event stream exceeds the {$this->maxResponseBytes} byte limit.");
+            }
+
+            $buffer .= str_replace("\r\n", "\n", $chunk);
+
+            while (($end = strpos($buffer, "\n\n")) !== false) {
+                $event = substr($buffer, 0, $end);
+                $buffer = substr($buffer, $end + 2);
+                $data = [];
+
+                foreach (explode("\n", $event) as $line) {
+                    if (str_starts_with($line, 'data:')) {
+                        $data[] = ltrim(substr($line, 5), ' ');
+                    }
+                }
+
+                if ($data !== []) {
+                    yield implode("\n", $data);
+                }
+            }
+        }
     }
 }

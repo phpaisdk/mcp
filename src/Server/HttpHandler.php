@@ -26,12 +26,17 @@ final class HttpHandler implements RequestHandlerInterface
      * @param  list<string>|null  $allowedOrigins  Exact origins (scheme://host[:port]) that may call
      *                                             from a browser; "*" allows any. Null allows only an
      *                                             Origin whose host equals the request Host.
+     * @param  int  $maxBodyBytes  Largest accepted request body; larger requests get 413.
+     * @param  (\Closure(ServerRequestInterface): ?ResponseInterface)|null  $authenticator  Return a response (for example 401 with
+     *                                             WWW-Authenticate) to reject the request, or null to continue.
      */
     public function __construct(
         private readonly Server $server,
         private readonly ResponseFactoryInterface $responseFactory,
         private readonly StreamFactoryInterface $streamFactory,
         private readonly ?array $allowedOrigins = null,
+        private readonly int $maxBodyBytes = 1_048_576,
+        private readonly ?\Closure $authenticator = null,
     ) {}
 
     public function handle(ServerRequestInterface $request): ResponseInterface
@@ -43,6 +48,20 @@ final class HttpHandler implements RequestHandlerInterface
         // Pre-2026 session mechanics (GET stream, DELETE) are intentionally unsupported.
         if ($request->getMethod() !== 'POST') {
             return $this->responseFactory->createResponse(405)->withHeader('Allow', 'POST');
+        }
+
+        if ($this->authenticator !== null) {
+            $rejection = ($this->authenticator)($request);
+
+            if ($rejection instanceof ResponseInterface) {
+                return $rejection;
+            }
+        }
+
+        $size = $request->getBody()->getSize();
+
+        if (($size !== null && $size > $this->maxBodyBytes) || (int) $request->getHeaderLine('Content-Length') > $this->maxBodyBytes) {
+            return $this->json(['jsonrpc' => '2.0', 'id' => null, 'error' => ['code' => Protocol::INVALID_REQUEST, 'message' => 'Request body too large.']], 413);
         }
 
         $message = json_decode((string) $request->getBody(), true);
