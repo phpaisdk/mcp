@@ -200,3 +200,51 @@ it('skips remote tool definitions with unsafe names and can require approval', f
 
     expect($tools)->toHaveCount(1)->and($tools[0]->name())->toBe('ok_tool')->and($tools[0]->requiresApproval())->toBeTrue();
 });
+
+it('turns a missing stdio command into an McpException instead of a PHP warning', function () {
+    set_error_handler(static fn(int $no, string $str) => (error_reporting() & $no) ? throw new ErrorException($str) : false);
+
+    try {
+        $client = new Client(new StdioTransport(['/no/such/binary-aisdk'], timeoutSeconds: 2));
+        expect(fn() => $client->listTools(true))->toThrow(McpException::class, 'Could not start');
+    } finally {
+        restore_error_handler();
+    }
+});
+
+it('wraps HTTP clients that throw non-PSR exceptions and tolerates odd JSON-RPC errors', function () {
+    $factory = new Psr17Factory();
+    $broken = new class implements ClientInterface {
+        public function sendRequest(RequestInterface $request): ResponseInterface
+        {
+            throw new RuntimeException('boom');
+        }
+    };
+    expect(fn() => (new Client(new HttpTransport('https://x.test/mcp', $broken, $factory, $factory)))->listTools(true))->toThrow(McpException::class, 'boom');
+
+    set_error_handler(static fn(int $no, string $str) => throw new ErrorException($str));
+
+    try {
+        $odd = new class implements ClientInterface {
+            public function sendRequest(RequestInterface $request): ResponseInterface
+            {
+                return new Response(200, ['Content-Type' => 'application/json'], json_encode(['jsonrpc' => '2.0', 'id' => 1, 'error' => ['code' => 'x', 'message' => ['nested']]]));
+            }
+        };
+        expect(fn() => (new Client(new HttpTransport('https://x.test/mcp', $odd, $factory, $factory)))->listTools(true))->toThrow(AiSdk\Mcp\Exceptions\ProtocolException::class, 'MCP error');
+    } finally {
+        restore_error_handler();
+    }
+});
+
+it('rejects a tools/list answer whose tools field is not a list', function () {
+    $factory = new Psr17Factory();
+    $http = new class implements ClientInterface {
+        public function sendRequest(RequestInterface $request): ResponseInterface
+        {
+            return new Response(200, ['Content-Type' => 'application/json'], json_encode(['jsonrpc' => '2.0', 'id' => 1, 'result' => ['resultType' => 'complete', 'tools' => 'x', 'ttlMs' => 0]]));
+        }
+    };
+
+    expect(fn() => (new Client(new HttpTransport('https://x.test/mcp', $http, $factory, $factory)))->listTools(true))->toThrow(McpException::class, 'malformed');
+});

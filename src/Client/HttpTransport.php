@@ -8,6 +8,7 @@ use AiSdk\Mcp\Exceptions\LegacyServerException;
 use AiSdk\Mcp\Exceptions\McpException;
 use AiSdk\Mcp\Protocol;
 use AiSdk\Mcp\Support\HeaderEncoding;
+use AiSdk\Utils\Errors\Redactor;
 use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestFactoryInterface;
@@ -84,7 +85,14 @@ final class HttpTransport implements Transport
         try {
             $response = $this->http->sendRequest($request);
         } catch (ClientExceptionInterface $e) {
-            throw new McpException('MCP HTTP transport error: ' . $e->getMessage(), ['url' => $this->url], $e);
+            throw new McpException('MCP HTTP transport error: ' . Redactor::text($e->getMessage()), ['url' => Redactor::url($this->url)], $e);
+        } catch (\Throwable $e) {
+            // PSR-18 clients must throw ClientExceptionInterface; some do not. Programmer errors still propagate.
+            if ($e instanceof \Error || $e instanceof McpException) {
+                throw $e;
+            }
+
+            throw new McpException('MCP HTTP client failure (' . $e::class . '): ' . Redactor::text($e->getMessage()), ['url' => Redactor::url($this->url)], $e);
         }
 
         if ($this->legacyVersion !== null && $method === 'initialize' && $response->getStatusCode() === 200) {

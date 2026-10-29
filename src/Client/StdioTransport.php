@@ -125,10 +125,11 @@ final class StdioTransport implements Transport
         }
 
         $stderr = defined('STDERR') ? STDERR : ['file', '/dev/null', 'w'];
-        $process = proc_open($this->command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => $stderr], $this->pipes, $this->cwd, $this->environment());
+        // proc_open reports a missing binary as a PHP warning; turn that into a normal MCP failure.
+        $process = @proc_open($this->command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => $stderr], $this->pipes, $this->cwd, $this->environment());
 
         if (! is_resource($process)) {
-            throw new McpException('Could not start the MCP server process: ' . implode(' ', $this->command));
+            throw new McpException('Could not start the MCP server process [' . ($this->command[0] ?? '') . '].');
         }
 
         $this->process = $process;

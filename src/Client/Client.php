@@ -114,7 +114,11 @@ final class Client
         do {
             $result = $this->request('tools/list', $cursor === null ? [] : ['cursor' => $cursor]);
 
-            foreach (is_array($result['tools'] ?? null) ? $result['tools'] : [] as $definition) {
+            if (! is_array($result['tools'] ?? null)) {
+                throw new McpException('The server returned a malformed response to tools/list.');
+            }
+
+            foreach ($result['tools'] as $definition) {
                 if (is_array($definition) && is_string($definition['name'] ?? null) && $this->headerAnnotationsValid($definition)) {
                     $definitions[] = $definition;
                 }
@@ -284,9 +288,10 @@ final class Client
             $response = $this->transport->send($message, $paramHeaders);
 
             if (isset($response['error']) && is_array($response['error'])) {
+                $rawMessage = $response['error']['message'] ?? null;
                 $error = new ProtocolException(
-                    (string) ($response['error']['message'] ?? 'MCP error'),
-                    (int) ($response['error']['code'] ?? Protocol::INTERNAL_ERROR),
+                    is_string($rawMessage) && $rawMessage !== '' ? mb_strcut($rawMessage, 0, 1000) : 'MCP error',
+                    is_int($response['error']['code'] ?? null) ? $response['error']['code'] : Protocol::INTERNAL_ERROR,
                     is_array($response['error']['data'] ?? null) ? $response['error']['data'] : null,
                 );
 
