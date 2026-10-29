@@ -59,3 +59,7 @@ composer test:all   # all three
 
 - Package docs: https://phpaisdk.com/docs/mcp (Markdown: append `.md`)
 - Index for agents: https://phpaisdk.com/llms.txt
+
+## Changelog
+
+Keep `CHANGELOG.md` current: add short, user-facing entries (what users can do now, dependency compatibility) for every release. Release notes on GitHub should match.
