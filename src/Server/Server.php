@@ -126,62 +126,87 @@ final class Server
 
     /**
      * @param  array<string, mixed>  $message
+     * @param  string|null  $protocolVersion  Transport-selected era; null requires modern metadata except for initialize.
      */
-    public function process(array $message): Reply
+    public function process(array $message, ?string $protocolVersion = null): Reply
     {
         $isRequest = array_key_exists('id', $message);
         $id = $message['id'] ?? null;
 
-        if (! $isRequest) {
-            return new Reply(null, 202);
-        }
-
-        if (! is_int($id) && ! is_string($id)) {
+        if ($isRequest && ! is_int($id) && ! is_string($id)) {
             return $this->error(null, ProtocolException::invalidRequest('Request id must be a string or integer.'));
         }
 
         $method = $message['method'] ?? null;
-        if (($message['jsonrpc'] ?? null) !== '2.0' || ! is_string($method)) {
-            return $this->error($id, ProtocolException::invalidRequest('Not a valid JSON-RPC 2.0 request.'));
+        if (($message['jsonrpc'] ?? null) !== '2.0' || ! is_string($method) || $method === '') {
+            return $this->error($isRequest ? $id : null, ProtocolException::invalidRequest('Not a valid JSON-RPC 2.0 request.'));
         }
 
         $params = $message['params'] ?? [];
-        if (! is_array($params)) {
-            return $this->error($id, ProtocolException::invalidParams('params must be an object.'));
+        if ((array_key_exists('params', $message) && $message['params'] === null)
+            || ! is_array($params) || ($params !== [] && array_is_list($params))) {
+            return $isRequest
+                ? $this->error($id, ProtocolException::invalidParams('params must be an object.', 400))
+                : new Reply(null, 400);
         }
 
+        if (! $isRequest) {
+            // Never execute a method sent as a notification. Validate its envelope
+            // even though JSON-RPC notifications must not receive a response.
+            return new Reply(null, 202);
+        }
+
+        $legacy = $protocolVersion !== null
+            ? in_array($protocolVersion, Protocol::LEGACY_VERSIONS, true)
+            : ($method === 'initialize' && ! self::hasProtocolMeta($params));
+
         try {
-            $result = $this->dispatch($method, $params, (string) $id);
+            $result = $this->dispatch($method, $params, (string) $id, $legacy);
         } catch (ProtocolException $e) {
             return $this->error($id, $e);
         } catch (Throwable) {
             return $this->error($id, ProtocolException::internal());
         }
 
-        $result['resultType'] ??= Protocol::RESULT_COMPLETE;
-        $result['_meta'][Protocol::META_SERVER_INFO] = ['name' => $this->name, 'version' => $this->version];
+        if (! $legacy) {
+            $result['resultType'] ??= Protocol::RESULT_COMPLETE;
+            $result['_meta'][Protocol::META_SERVER_INFO] = ['name' => $this->name, 'version' => $this->version];
+        } else {
+            unset($result['ttlMs'], $result['cacheScope']);
+        }
 
-        return new Reply(['jsonrpc' => '2.0', 'id' => $id, 'result' => $result]);
+        return new Reply(['jsonrpc' => '2.0', 'id' => $id, 'result' => $result === [] ? new \stdClass() : $result]);
+    }
+
+    /** @param array<string, mixed> $params */
+    public static function hasProtocolMeta(array $params): bool
+    {
+        $meta = $params['_meta'] ?? null;
+
+        return is_array($meta) && (array_key_exists(Protocol::META_PROTOCOL_VERSION, $meta)
+            || array_key_exists(Protocol::META_CLIENT_CAPABILITIES, $meta));
     }
 
     /**
      * @param  array<string, mixed>  $params
      * @return array<string, mixed>
      */
-    private function dispatch(string $method, array $params, string $requestId): array
+    private function dispatch(string $method, array $params, string $requestId, bool $legacy): array
     {
-        if ($method === 'initialize') {
-            throw ProtocolException::invalidParams(
-                'This server speaks only the stateless protocol; initialize is not supported. Supported versions: '
-                . implode(', ', Protocol::SUPPORTED_VERSIONS) . '.',
-                400,
-            );
+        if ($legacy && $method === 'initialize') {
+            return $this->initialize($params);
         }
 
-        $meta = Meta::fromParams($params);
+        if (! $legacy) {
+            $meta = Meta::fromParams($params);
 
-        if (! in_array($meta->protocolVersion, Protocol::SUPPORTED_VERSIONS, true)) {
-            throw ProtocolException::unsupportedVersion($meta->protocolVersion, Protocol::SUPPORTED_VERSIONS);
+            if (! in_array($meta->protocolVersion, Protocol::SUPPORTED_VERSIONS, true)) {
+                throw ProtocolException::unsupportedVersion($meta->protocolVersion, Protocol::SUPPORTED_VERSIONS);
+            }
+        }
+
+        if ($legacy && $method === 'ping') {
+            return [];
         }
 
         return match ($method) {
@@ -200,6 +225,21 @@ final class Server
      */
     private function discover(): array
     {
+        $result = [
+            'supportedVersions' => Protocol::SUPPORTED_VERSIONS,
+            'capabilities' => $this->capabilities(),
+        ];
+
+        if ($this->instructions !== null) {
+            $result['instructions'] = $this->instructions;
+        }
+
+        return $this->cacheable($result);
+    }
+
+    /** @return object */
+    private function capabilities(): object
+    {
         $capabilities = [];
 
         if ($this->tools !== []) {
@@ -210,16 +250,36 @@ final class Server
             $capabilities['resources'] = new \stdClass();
         }
 
+        return (object) $capabilities;
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function initialize(array $params): array
+    {
+        $version = $params['protocolVersion'] ?? null;
+        $capabilities = $params['capabilities'] ?? null;
+        $info = $params['clientInfo'] ?? null;
+
+        if (! is_string($version) || $version === '' || strlen($version) > 128
+            || ! is_array($capabilities) || ($capabilities !== [] && array_is_list($capabilities))
+            || ! is_array($info) || ! is_string($info['name'] ?? null) || ! is_string($info['version'] ?? null)) {
+            throw ProtocolException::invalidParams('initialize requires protocolVersion, capabilities and clientInfo.', 400);
+        }
+
         $result = [
-            'supportedVersions' => Protocol::SUPPORTED_VERSIONS,
-            'capabilities' => (object) $capabilities,
+            'protocolVersion' => in_array($version, Protocol::LEGACY_VERSIONS, true) ? $version : Protocol::LEGACY_VERSIONS[0],
+            'capabilities' => $this->capabilities(),
+            'serverInfo' => ['name' => $this->name, 'version' => $this->version],
         ];
 
         if ($this->instructions !== null) {
             $result['instructions'] = $this->instructions;
         }
 
-        return $this->cacheable($result);
+        return $result;
     }
 
     /**

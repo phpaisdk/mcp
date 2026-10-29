@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AiSdk\Mcp\Client;
 
 use AiSdk\Mcp\Exceptions\McpException;
+use AiSdk\Mcp\Protocol;
 
 /** Opt-in adapter for initialize-based MCP; never retries a tool call. */
 final class LegacyTransport implements Transport
@@ -13,8 +14,8 @@ final class LegacyTransport implements Transport
 
     public function __construct(private readonly Transport $transport, private readonly string $version = '2025-11-25')
     {
-        if (! in_array($version, ['2025-11-25', '2025-06-18', '2025-03-26'], true)) {
-            throw new \InvalidArgumentException('Unsupported legacy MCP version.');
+        if (! in_array($version, Protocol::LEGACY_VERSIONS, true)) {
+            throw new McpException('Unsupported legacy MCP version.');
         }
     }
 

@@ -101,10 +101,14 @@ it('rejects unsupported versions and lists the supported ones', function () {
         ]);
 });
 
-it('explains that initialize is unsupported and names the supported versions', function () {
-    $reply = demoServer()->process(rpc('initialize', ['protocolVersion' => '2025-11-25'], withMeta: false));
+it('negotiates initialize with a legacy client', function () {
+    $reply = demoServer()->process(rpc('initialize', [
+        'protocolVersion' => '2025-11-25',
+        'capabilities' => new stdClass(),
+        'clientInfo' => ['name' => 'test', 'version' => '1.0.0'],
+    ], withMeta: false));
 
-    expect($reply->body['error']['message'])->toContain(Protocol::VERSION);
+    expect($reply->body['result']['protocolVersion'])->toBe('2025-11-25');
 });
 
 it('returns method not found for unknown and removed methods', function () {

@@ -67,7 +67,9 @@ final class StdioServer
             return json_encode(['jsonrpc' => '2.0', 'id' => null, 'error' => $error->toError()], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         }
 
-        $response = $this->server->handle($message);
+        $params = is_array($message['params'] ?? null) ? $message['params'] : [];
+        $version = Server::hasProtocolMeta($params) ? Protocol::VERSION : Protocol::LEGACY_VERSIONS[0];
+        $response = $this->server->process($message, $version)->body;
 
         return $response === null
             ? null

@@ -85,44 +85,66 @@ final class HttpHandler implements RequestHandlerInterface
             return $this->json(['jsonrpc' => '2.0', 'id' => null, 'error' => $error->toError()], $error->httpStatus);
         }
 
-        // Notifications are accepted without header validation.
-        if (! array_key_exists('id', $message)) {
-            return $this->json(null, 202);
-        }
-
-        $id = is_int($message['id']) || is_string($message['id']) ? $message['id'] : null;
+        $rawId = $message['id'] ?? null;
+        $id = is_int($rawId) || is_string($rawId) ? $rawId : null;
 
         try {
-            $this->validateHeaders($request, $message);
+            $version = $this->validateHeaders($request, $message);
         } catch (ProtocolException $e) {
             return $this->json(['jsonrpc' => '2.0', 'id' => $id, 'error' => $e->toError()], $e->httpStatus);
         }
 
-        $reply = $this->server->process($message);
+        $reply = $this->server->process($message, $version);
 
-        return $this->json($reply->body, $reply->body === null ? 202 : $reply->status);
+        return $this->json($reply->body, $reply->status);
     }
 
     /**
      * @param  array<string, mixed>  $message
      */
-    private function validateHeaders(ServerRequestInterface $request, array $message): void
+    private function validateHeaders(ServerRequestInterface $request, array $message): string
     {
         $method = $message['method'] ?? null;
         $params = is_array($message['params'] ?? null) ? $message['params'] : [];
 
         $versionHeader = $request->getHeaderLine('MCP-Protocol-Version');
+        $modern = Server::hasProtocolMeta($params) || $versionHeader === Protocol::VERSION
+            || ($method !== 'initialize' && $request->hasHeader('Mcp-Method') && $versionHeader === '');
+
+        if (! $modern) {
+            if ($versionHeader !== '' && ! in_array($versionHeader, Protocol::LEGACY_VERSIONS, true)) {
+                throw new ProtocolException(
+                    'Unsupported protocol version',
+                    Protocol::INVALID_PARAMS,
+                    ['supported' => Protocol::LEGACY_VERSIONS, 'requested' => substr($versionHeader, 0, 128)],
+                    400,
+                );
+            }
+
+            return $versionHeader === '' ? '2025-03-26' : $versionHeader;
+        }
+
+        // Modern notification headers are not defined by the binding. Still
+        // reject an explicitly unsupported version on any incoming message.
+        if ($versionHeader !== '' && ! in_array($versionHeader, [...Protocol::SUPPORTED_VERSIONS, ...Protocol::LEGACY_VERSIONS], true)) {
+            throw ProtocolException::unsupportedVersion(substr($versionHeader, 0, 128), Protocol::SUPPORTED_VERSIONS);
+        }
+
+        if (! array_key_exists('id', $message)) {
+            return Protocol::VERSION;
+        }
+
         if ($versionHeader === '') {
             throw ProtocolException::headerMismatch('Missing required MCP-Protocol-Version header.');
         }
 
         $metaVersion = is_array($params['_meta'] ?? null) ? ($params['_meta'][Protocol::META_PROTOCOL_VERSION] ?? null) : null;
         if (is_string($metaVersion) && $metaVersion !== $versionHeader) {
-            throw ProtocolException::headerMismatch("MCP-Protocol-Version header '{$versionHeader}' does not match _meta protocol version '{$metaVersion}'.");
+            throw ProtocolException::headerMismatch('MCP-Protocol-Version header does not match _meta protocol version.');
         }
 
         if (! is_string($method)) {
-            return;
+            return Protocol::VERSION;
         }
 
         if ($request->getHeaderLine('Mcp-Method') !== $method) {
@@ -136,7 +158,7 @@ final class HttpHandler implements RequestHandlerInterface
         };
 
         if ($nameField === null) {
-            return;
+            return Protocol::VERSION;
         }
 
         $expected = $params[$nameField] ?? null;
@@ -145,6 +167,8 @@ final class HttpHandler implements RequestHandlerInterface
         if (! is_string($expected) || $header === null || $header !== $expected) {
             throw ProtocolException::headerMismatch("Mcp-Name header is missing or does not match params.{$nameField}.");
         }
+
+        return Protocol::VERSION;
     }
 
     private function originAllowed(ServerRequestInterface $request): bool

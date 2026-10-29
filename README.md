@@ -12,7 +12,7 @@ Stateless [Model Context Protocol](https://modelcontextprotocol.io) client and s
 
 - **Server**: expose SDK tools and resources to any MCP client over Streamable HTTP (a PSR-15 handler) or stdio.
 - **Client**: connect to MCP servers and hand their tools to `Generate::text()` as ordinary SDK tools, so they work with every provider.
-- **Stateless by design**: no handshake and no sessions. Every request carries its protocol version and capabilities, so any server instance can answer any request and there is nothing to store between calls.
+- **Stateless by design**: modern clients send version and capabilities on every request. Servers also accept legacy initialization without storing sessions, so any server instance can answer subsequent requests.
 - **No dependency on another MCP SDK**: only `aisdk/core` and PSR interfaces.
 
 ## Installation
@@ -111,7 +111,7 @@ Server behaviour worth knowing:
 
 - Tools are listed in deterministic order, with `ttlMs`/`cacheScope` cache hints.
 - Invalid tool input is returned as an execution error the model can correct. Exceptions thrown by a handler are reported generically; call `exposeToolErrors()` to include their messages.
-- The HTTP binding validates `Origin` (same host by default), `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` against the body, and answers `405` to `GET`/`DELETE`.
+- The modern HTTP binding validates `Origin` (same host by default), `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` against the body, and answers `405` to `GET`/`DELETE`.
 
 ## Security
 
@@ -132,15 +132,21 @@ MCP servers and clients handle untrusted input in both directions, so the defaul
 
 | | |
 |---|---|
-| Protocol | `2026-07-28` |
+| Protocol | `2026-07-28`; servers also serve `2025-11-25`, `2025-06-18`, `2025-03-26` |
 | Transports | Streamable HTTP (client and server), stdio (client and server), in-memory |
 | Servers using the older `initialize` handshake | Opt-in `Client::legacyHttp()` for Streamable HTTP; default clients remain stateless |
 | Roots, Sampling, Logging | Deprecated by the spec; not implemented |
 | Not implemented yet | `subscriptions/listen`, prompts, the Tasks and MCP Apps extensions, OAuth discovery |
 
-### Legacy HTTP servers
+### Serve legacy clients
 
-Use `Client::legacyHttp($url, $http, $requestFactory, $streamFactory)` for initialize-based peers. It supports explicit revisions `2025-11-25` (default), `2025-06-18`, and `2025-03-26`. Initialization must return the configured version. The client sends `notifications/initialized`, preserves the session header and never automatically replays a failed tool call. Default `Client::http()` behavior is unchanged. Legacy stdio, old GET/SSE transport, server-initiated requests and automatic session recovery are not supported.
+`Server`, `HttpHandler` and `StdioServer` serve initialize-based clients alongside modern clients with the same tools and resources. Legacy initialization returns the requested supported revision (or `2025-11-25` for an unknown revision), server identity, capabilities and instructions. `notifications/initialized` is accepted and `ping` returns an empty result. No session IDs are issued or stored, and supplied session IDs are ignored.
+
+For HTTP, legacy requests use `MCP-Protocol-Version` without modern metadata or `Mcp-Method`/`Mcp-Name` headers. Headerless legacy HTTP requests use `2025-03-26`. Unsupported legacy version headers return HTTP 400 with JSON-RPC `-32602`; modern requests retain their metadata and header checks. For stdio, requests carrying modern protocol metadata use modern semantics; requests without it use legacy semantics. The negotiated legacy revisions share the implemented tools/resources behavior, so no connection state is needed. GET/SSE streams, session deletion, subscriptions and server-initiated requests are unsupported.
+
+### Connect to legacy HTTP servers
+
+Use `Client::legacyHttp($url, $http, $requestFactory, $streamFactory)` for initialize-based peers. It supports explicit revisions `2025-11-25` (default), `2025-06-18`, and `2025-03-26`. Initialization must return the configured version. The client sends `notifications/initialized`, preserves the session header and never automatically replays a failed tool call. Default `Client::http()` behavior is unchanged. The client has no `legacyStdio()` factory. Old GET/SSE transport, server-initiated requests and automatic session recovery are not supported.
 
 ## Development
 

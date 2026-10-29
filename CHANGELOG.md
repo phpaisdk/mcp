@@ -2,6 +2,11 @@
 
 Notable changes to `aisdk/mcp`. Release notes are also published at https://github.com/phpaisdk/mcp/releases.
 
+## Unreleased (v0.11.0)
+
+- Serve legacy MCP clients over Streamable HTTP and stdio alongside modern clients, with initialization, ping and shared tools/resources without session storage.
+- Reject malformed notification parameters and unsupported legacy protocol-version headers before processing.
+
 ## v0.10.1 — 2026-10-29
 
 - Odd JSON-RPC errors, non-PSR HTTP clients, a missing stdio command and malformed tool lists raise typed `McpException`/`ProtocolException` instead of PHP warnings or native exceptions.

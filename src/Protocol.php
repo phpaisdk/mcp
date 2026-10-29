@@ -14,6 +14,9 @@ final class Protocol
     /** Versions this package can speak, newest first. */
     public const array SUPPORTED_VERSIONS = [self::VERSION];
 
+    /** Initialize-based revisions accepted by the server and opt-in clients. */
+    public const array LEGACY_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
+
     public const string META_PROTOCOL_VERSION = 'io.modelcontextprotocol/protocolVersion';
     public const string META_CLIENT_INFO = 'io.modelcontextprotocol/clientInfo';
     public const string META_CLIENT_CAPABILITIES = 'io.modelcontextprotocol/clientCapabilities';
