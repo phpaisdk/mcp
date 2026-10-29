@@ -2,6 +2,11 @@
 
 Notable changes to `aisdk/mcp`. Release notes are also published at https://github.com/phpaisdk/mcp/releases.
 
+## Unreleased (v0.10.1)
+
+- Odd JSON-RPC errors, non-PSR HTTP clients, a missing stdio command and malformed tool lists raise typed `McpException`/`ProtocolException` instead of PHP warnings or native exceptions.
+- Approval-gated tools are refused on servers; remote tools can require approval; message sizes are bounded.
+
 ## v0.10.0 — 2026-10-29
 
 ### First release
