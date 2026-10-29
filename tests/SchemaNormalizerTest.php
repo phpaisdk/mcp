@@ -85,3 +85,9 @@ it('normalizes remote model tool schemas without calling the server tool', funct
     expect($tool->inputSchemaForProvider()['properties']['value'])->toBe(['type' => 'string'])
         ->and($transport->sent)->toHaveCount(1);
 });
+
+it('makes implicit nested object types explicit for model providers', function () {
+    $result = SchemaNormalizer::normalize(['properties' => ['config' => ['properties' => ['key' => ['type' => 'string']]]]]);
+    expect($result['properties']['config']['type'])->toBe('object')
+        ->and($result['properties']['config']['additionalProperties'])->toBeFalse();
+});

@@ -193,6 +193,7 @@ final class SchemaNormalizer
             }
         }
         if (in_array('object', (array) ($result['type'] ?? []), true) || isset($result['properties'])) {
+            $result['type'] ??= 'object';
             $result['properties'] ??= new \stdClass();
             $result['additionalProperties'] ??= false;
         }
