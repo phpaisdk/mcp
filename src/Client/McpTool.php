@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace AiSdk\Mcp\Client;
 
+use AiSdk\Mcp\Exceptions\McpException;
+use AiSdk\Mcp\Support\SchemaNormalizer;
 use AiSdk\Tool;
 use AiSdk\ToolExecutionContext;
 
@@ -15,6 +17,9 @@ use AiSdk\ToolExecutionContext;
  */
 final class McpTool extends Tool
 {
+    /** @var array<string, mixed>|null */
+    private ?array $normalizedSchema = null;
+
     /**
      * @param  array<string, mixed>  $definition  A tools/list entry.
      */
@@ -23,7 +28,11 @@ final class McpTool extends Tool
         private readonly array $definition,
         private readonly string $exposedName,
     ) {
-        parent::__construct($exposedName, (string) ($definition['description'] ?? $definition['title'] ?? ''));
+        $description = $definition['description'] ?? $definition['title'] ?? '';
+        if (! is_string($description) || ! is_string($definition['name'] ?? null)) {
+            throw new McpException('Malformed remote MCP tool definition.');
+        }
+        parent::__construct($exposedName, $description);
     }
 
     public function name(): string
@@ -48,7 +57,11 @@ final class McpTool extends Tool
     {
         $schema = $this->definition['inputSchema'] ?? null;
 
-        return is_array($schema) && $schema !== [] ? $schema : ['type' => 'object', 'additionalProperties' => false];
+        if ($schema !== null && ! is_array($schema)) {
+            throw new McpException('Remote MCP tool inputSchema must be an object.');
+        }
+
+        return $this->normalizedSchema ??= SchemaNormalizer::normalize($schema ?? []);
     }
 
     public function handler(): callable

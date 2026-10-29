@@ -54,3 +54,21 @@ function legacyInitialize(string $version): array
         'clientInfo' => ['name' => 'legacy-test', 'version' => '1.0.0'],
     ], withMeta: false);
 }
+
+/** A transport that replays canned responses and records what it was sent. */
+function scripted(array $responses): object
+{
+    return new class ($responses) implements \AiSdk\Mcp\Client\Transport {
+        public array $sent = [];
+
+        public function __construct(private array $responses) {}
+
+        public function send(array $message, array $paramHeaders = []): array
+        {
+            $this->sent[] = $message;
+            $next = array_shift($this->responses);
+
+            return ['jsonrpc' => '2.0', 'id' => $message['id']] + $next;
+        }
+    };
+}

@@ -57,6 +57,12 @@ $mcp->readResource('docs://intro');
 
 Tool execution errors (`isError: true`) are returned to the model as text so it can recover. Protocol errors raise `ProtocolException`.
 
+### Remote tool schemas
+
+`McpTool::inputSchemaForProvider()` normalizes remote JSON Schema into a bounded subset before exposing it to a model. Local JSON Pointer `$ref`s are inlined, simple `allOf` objects are merged, and `anyOf`, enums, required fields and explicit `additionalProperties` are preserved. Object schemas receive `properties: {}` when absent and default to `additionalProperties: false`. Only the shared `date-time` format is retained; dialect identifiers, definitions after expansion, and unsupported keywords are removed. The remote server still owns argument validation, and providers may apply their own strict-mode restrictions.
+
+External references, cycles, conflicting composition, invalid shapes and oversized schemas raise `McpException`. Limits are 32 nesting levels, 4,096 nodes, 128 reference expansions and 256 KiB before and after expansion. No schema references trigger network access.
+
 ### Servers that ask for input
 
 A server can pause a `tools/call` and ask for input (elicitation). Register a handler and the client completes the round trip for you, echoing the server's opaque `requestState` exactly:
