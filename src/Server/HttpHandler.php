@@ -22,12 +22,15 @@ use Psr\Http\Server\RequestHandlerInterface;
  */
 final class HttpHandler implements RequestHandlerInterface
 {
+    /** @var (\Closure(ServerRequestInterface): ?ResponseInterface)|null */
+    private readonly ?\Closure $authenticator;
+
     /**
      * @param  list<string>|null  $allowedOrigins  Exact origins (scheme://host[:port]) that may call
      *                                             from a browser; "*" allows any. Null allows only an
      *                                             Origin whose host equals the request Host.
      * @param  int  $maxBodyBytes  Largest accepted request body; larger requests get 413.
-     * @param  (\Closure(ServerRequestInterface): ?ResponseInterface)|null  $authenticator  Return a response (for example 401 with
+     * @param  (callable(ServerRequestInterface): ?ResponseInterface)|null  $authenticator  Return a response (for example 401 with
      *                                             WWW-Authenticate) to reject the request, or null to continue.
      */
     public function __construct(
@@ -36,8 +39,10 @@ final class HttpHandler implements RequestHandlerInterface
         private readonly StreamFactoryInterface $streamFactory,
         private readonly ?array $allowedOrigins = null,
         private readonly int $maxBodyBytes = 1_048_576,
-        private readonly ?\Closure $authenticator = null,
-    ) {}
+        ?callable $authenticator = null,
+    ) {
+        $this->authenticator = $authenticator === null ? null : \Closure::fromCallable($authenticator);
+    }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {

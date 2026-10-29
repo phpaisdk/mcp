@@ -4,6 +4,8 @@ Notable changes to `aisdk/mcp`. Release notes are also published at https://gith
 
 ## Unreleased (v0.11.0)
 
+- Publish OAuth protected-resource metadata and scope challenges, and authenticate header bearer tokens through an application-supplied verifier before parsing MCP requests.
+
 - Adapt remote tool schemas for model providers with bounded local-reference expansion and safe failures for cyclic, oversized or conflicting schemas.
 
 - Register prompts, URI resource templates and argument completions; clients can list, render and complete them over either protocol era.

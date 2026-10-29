@@ -180,6 +180,41 @@ MCP servers and clients handle untrusted input in both directions, so the defaul
 - **Remote tools can require approval.** `$mcp->tools(requireApproval: true)` marks every remote tool so an `Agent` pauses before calling it. Remote tools with names outside `A-Z a-z 0-9 _ - .` are skipped.
 - **Treat tool descriptions and results from third-party servers as untrusted input.** They can contain prompt-injection text. Prefer allow-listing tools (`$mcp->tools(only: ['search'])`) and use `requireApproval: true` for tools with side effects.
 
+## OAuth resource-server helpers
+
+These helpers implement the resource-server side of RFC 9728 and RFC 6750. Supply your own authorization server and token verifier; the package performs no OAuth discovery or token issuance.
+
+```php
+use AiSdk\Mcp\Auth\BearerAuthenticator;
+use AiSdk\Mcp\Auth\ProtectedResourceMetadata;
+
+$metadata = new ProtectedResourceMetadata(
+    resource: 'https://example.com/mcp',
+    authorizationServers: ['https://auth.example.com'],
+    scopesSupported: ['mcp:tools'],
+);
+
+// $verifyToken is your application's callable(string $token, ServerRequestInterface $request): ?array.
+// Validate signature, issuer, audience/resource, expiry and revocation. Return granted
+// scope strings for a valid token, or null for an invalid token. Do not log the token.
+$authenticator = new BearerAuthenticator(
+    verifier: $verifyToken,
+    responses: $responseFactory,
+    metadataUrl: $metadata->metadataUrl(),
+    requiredScopes: ['mcp:tools'],
+);
+$handler = new HttpHandler($server, $responseFactory, $streamFactory, authenticator: $authenticator);
+
+// Route GET /.well-known/oauth-protected-resource/mcp:
+$response = $metadata->response($responseFactory, $streamFactory);
+// Route POST /mcp:
+$response = $handler->handle($serverRequest);
+```
+
+For a resource identifier without a path, `metadataUrl()` uses `/.well-known/oauth-protected-resource`. A resource path is appended to that well-known path per RFC 9728. The document advertises header tokens by default. Missing or invalid tokens receive 401, insufficient scopes receive 403 with `error="insufficient_scope"` and all required scopes, and malformed credentials receive 400. Verifier failures deny access without exposing their messages. Authentication runs before parsing the MCP body.
+
+`BearerToken::extract($request)` accepts only one bounded `Authorization: Bearer ...` header. `BearerChallenge::header($metadataUrl, error: 'insufficient_scope', scopes: ['mcp:tools'])` builds a safe challenge independently; `BearerChallenge::response()` builds a PSR-7 rejection. Resource, issuer and metadata URLs require HTTPS except for exact `localhost`, `127.0.0.1` and `[::1]` loopback hosts. Credentials, query strings, fragments and control characters are rejected. URL validation performs no network requests or redirects.
+
 ## Compatibility
 
 | | |
@@ -188,7 +223,7 @@ MCP servers and clients handle untrusted input in both directions, so the defaul
 | Transports | Streamable HTTP (client and server), stdio (client and server), in-memory |
 | Servers using the older `initialize` handshake | Opt-in `Client::legacyHttp()` for Streamable HTTP; default clients remain stateless |
 | Roots, Sampling, Logging | Deprecated by the spec; not implemented |
-| Not implemented yet | `subscriptions/listen`, the Tasks and MCP Apps extensions, OAuth discovery |
+| Not implemented yet | `subscriptions/listen`, the Tasks and MCP Apps extensions, OAuth client discovery |
 
 ### Serve legacy clients
 
