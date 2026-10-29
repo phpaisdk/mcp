@@ -13,15 +13,6 @@ use AiSdk\Tool;
 use Nyholm\Psr7\Factory\Psr17Factory;
 use Nyholm\Psr7\ServerRequest;
 
-function legacyInitialize(string $version): array
-{
-    return rpc('initialize', [
-        'protocolVersion' => $version,
-        'capabilities' => new stdClass(),
-        'clientInfo' => ['name' => 'legacy-test', 'version' => '1.0.0'],
-    ], withMeta: false);
-}
-
 function legacyPost(HttpHandler $handler, array $message, array $headers = []): Psr\Http\Message\ResponseInterface
 {
     return $handler->handle(new ServerRequest('POST', 'https://mcp.test/mcp', $headers, json_encode($message)));
@@ -56,7 +47,7 @@ it('negotiates legacy initialization and advertises the actual registry', functi
         ->and($response->hasHeader('Mcp-Session-Id'))->toBeFalse()
         ->and($result)->toBe([
             'protocolVersion' => $version,
-            'capabilities' => ['tools' => [], 'resources' => []],
+            'capabilities' => ['tools' => ['listChanged' => false], 'resources' => ['listChanged' => false, 'subscribe' => false]],
             'serverInfo' => ['name' => 'demo', 'version' => '1.2.3'],
             'instructions' => 'Use greet to say hello.',
         ]);

@@ -9,6 +9,7 @@ use AiSdk\Mcp\Exceptions\McpException;
 use AiSdk\Mcp\Exceptions\ProtocolException;
 use AiSdk\Mcp\Protocol;
 use AiSdk\Mcp\Support\ParamHeaders;
+use AiSdk\Mcp\Support\Payload;
 use Closure;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestFactoryInterface;
@@ -196,6 +197,80 @@ final class Client
         $result = $this->request('resources/read', ['uri' => $uri]);
 
         return array_values(array_filter(is_array($result['contents'] ?? null) ? $result['contents'] : [], is_array(...)));
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function listPrompts(): array
+    {
+        $result = $this->request('prompts/list');
+        $prompts = $result['prompts'] ?? null;
+        if (! is_array($prompts) || ! array_is_list($prompts)) {
+            throw new McpException('Malformed prompts/list response.');
+        }
+
+        return array_values(array_filter($prompts, is_array(...)));
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function listResourceTemplates(): array
+    {
+        $result = $this->request('resources/templates/list');
+        $templates = $result['resourceTemplates'] ?? null;
+        if (! is_array($templates) || ! array_is_list($templates)) {
+            throw new McpException('Malformed resources/templates/list response.');
+        }
+
+        return array_values(array_filter($templates, is_array(...)));
+    }
+
+    /**
+     * @param array<string, string> $arguments
+     * @return array<string, mixed>
+     */
+    public function getPrompt(string $name, array $arguments = []): array
+    {
+        $result = $this->request('prompts/get', ['name' => $name, 'arguments' => (object) $arguments]);
+        if (! is_array($result['messages'] ?? null) || ! array_is_list($result['messages'])) {
+            throw new McpException('Malformed prompts/get response.');
+        }
+        Payload::check($result);
+        foreach ($result['messages'] as $message) {
+            if (! is_array($message) || ! in_array($message['role'] ?? null, ['user', 'assistant'], true) || ! is_array($message['content'] ?? null)) {
+                throw new McpException('Malformed prompts/get response.');
+            }
+            Payload::content([$message['content']]);
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param array<string, string> $ref
+     * @param array<string, string> $context
+     * @return array<string, mixed>
+     */
+    public function complete(array $ref, string $argument, string $value, array $context = []): array
+    {
+        $result = $this->request('completion/complete', ['ref' => $ref, 'argument' => ['name' => $argument, 'value' => $value],
+            'context' => ['arguments' => (object) $context]]);
+        $completion = $result['completion'] ?? null;
+        if (! is_array($completion) || ! is_array($completion['values'] ?? null) || ! array_is_list($completion['values'])
+            || count($completion['values']) > 100) {
+            throw new McpException('Malformed completion response.');
+        }
+        foreach ($completion['values'] as $suggestion) {
+            if (! is_string($suggestion)) {
+                throw new McpException('Malformed completion response.');
+            }
+        }
+
+        Payload::check($completion, 65_536);
+        if ((isset($completion['total']) && (! is_int($completion['total']) || $completion['total'] < count($completion['values'])))
+            || (isset($completion['hasMore']) && ! is_bool($completion['hasMore']))) {
+            throw new McpException('Malformed completion response.');
+        }
+
+        return $completion;
     }
 
     /**

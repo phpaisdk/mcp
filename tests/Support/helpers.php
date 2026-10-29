@@ -45,3 +45,12 @@ function demoServer(): Server
         ->tool($data)
         ->resource(TextResource::text('docs://intro', 'intro', '# Intro', description: 'Introduction'));
 }
+
+function legacyInitialize(string $version): array
+{
+    return rpc('initialize', [
+        'protocolVersion' => $version,
+        'capabilities' => new stdClass(),
+        'clientInfo' => ['name' => 'legacy-test', 'version' => '1.0.0'],
+    ], withMeta: false);
+}

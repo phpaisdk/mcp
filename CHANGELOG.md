@@ -4,6 +4,9 @@ Notable changes to `aisdk/mcp`. Release notes are also published at https://gith
 
 ## Unreleased (v0.11.0)
 
+- Register prompts, URI resource templates and argument completions; clients can list, render and complete them over either protocol era.
+- Return validated structured outputs, images, audio and resource links, with annotations, icons and metadata.
+
 - Serve legacy MCP clients over Streamable HTTP and stdio alongside modern clients, with initialization, ping and shared tools/resources without session storage.
 - Reject malformed notification parameters and unsupported legacy protocol-version headers before processing.
 

@@ -10,6 +10,8 @@ use AiSdk\Exceptions\SchemaValidationException;
 use AiSdk\Mcp\Exceptions\ProtocolException;
 use AiSdk\Mcp\Protocol;
 use AiSdk\Mcp\Support\Meta;
+use AiSdk\Mcp\Support\Payload;
+use AiSdk\Schema;
 use AiSdk\Tool;
 use AiSdk\ToolExecutionContext;
 use Throwable;
@@ -33,6 +35,18 @@ final class Server
 
     /** @var array<string, TextResource> */
     private array $resources = [];
+
+    /** @var array<string, Prompt> */
+    private array $prompts = [];
+
+    /** @var array<string, ResourceTemplate> */
+    private array $templates = [];
+
+    /** @var array<string, Schema> */
+    private array $outputSchemas = [];
+
+    /** @var array<string, array<string, mixed>> */
+    private array $toolMetadata = [];
 
     private ?string $instructions = null;
     private int $ttlMs = 60_000;
@@ -84,8 +98,10 @@ final class Server
 
     /**
      * @param  array<string, mixed>  $annotations  e.g. ['readOnlyHint' => true]
+     * @param  list<array<string, mixed>>  $icons
+     * @param  array<string, mixed>  $meta
      */
-    public function tool(Tool $tool, array $annotations = []): self
+    public function tool(Tool $tool, array $annotations = [], ?Schema $outputSchema = null, array $icons = [], array $meta = []): self
     {
         $name = $tool->name();
 
@@ -97,7 +113,15 @@ final class Server
             throw new InvalidArgumentException("Tool [{$name}] requires approval, which an MCP server cannot collect. Register it only after removing needsApproval(), or gate it in your own handler.");
         }
 
+        Payload::icons($icons);
+        Payload::check([$annotations, $meta, $outputSchema?->jsonSchema()]);
         $this->tools[$name] = $tool;
+        unset($this->toolAnnotations[$name], $this->outputSchemas[$name]);
+        $this->toolMetadata[$name] = array_filter(['icons' => $icons === [] ? null : $icons,
+            '_meta' => $meta === [] ? null : (object) $meta], static fn(mixed $v): bool => $v !== null);
+        if ($outputSchema !== null) {
+            $this->outputSchemas[$name] = $outputSchema;
+        }
 
         if ($annotations !== []) {
             $this->toolAnnotations[$name] = $annotations;
@@ -109,6 +133,20 @@ final class Server
     public function resource(TextResource $resource): self
     {
         $this->resources[$resource->uri] = $resource;
+
+        return $this;
+    }
+
+    public function prompt(Prompt $prompt): self
+    {
+        $this->prompts[$prompt->name] = $prompt;
+
+        return $this;
+    }
+
+    public function resourceTemplate(ResourceTemplate $template): self
+    {
+        $this->templates[$template->uriTemplate] = $template;
 
         return $this;
     }
@@ -162,6 +200,7 @@ final class Server
 
         try {
             $result = $this->dispatch($method, $params, (string) $id, $legacy);
+            Payload::check($result);
         } catch (ProtocolException $e) {
             return $this->error($id, $e);
         } catch (Throwable) {
@@ -214,8 +253,11 @@ final class Server
             'tools/list' => $this->cacheable(['tools' => $this->listTools()]),
             'tools/call' => $this->callTool($params, $requestId),
             'resources/list' => $this->cacheable(['resources' => $this->listResources()]),
-            'resources/templates/list' => $this->cacheable(['resourceTemplates' => []]),
+            'resources/templates/list' => $this->cacheable(['resourceTemplates' => $this->listTemplates()]),
             'resources/read' => $this->readResource($params),
+            'prompts/list' => $this->cacheable(['prompts' => $this->listPrompts()]),
+            'prompts/get' => $this->getPrompt($params),
+            'completion/complete' => $this->complete($params),
             default => throw ProtocolException::methodNotFound($method),
         };
     }
@@ -243,11 +285,21 @@ final class Server
         $capabilities = [];
 
         if ($this->tools !== []) {
-            $capabilities['tools'] = new \stdClass();
+            $capabilities['tools'] = ['listChanged' => false];
         }
 
-        if ($this->resources !== []) {
-            $capabilities['resources'] = new \stdClass();
+        if ($this->resources !== [] || $this->templates !== []) {
+            $capabilities['resources'] = ['listChanged' => false, 'subscribe' => false];
+        }
+
+        if ($this->prompts !== []) {
+            $capabilities['prompts'] = ['listChanged' => false];
+        }
+        foreach ([...$this->prompts, ...$this->templates] as $entry) {
+            if ($entry->hasCompletions()) {
+                $capabilities['completions'] = new \stdClass();
+                break;
+            }
         }
 
         return (object) $capabilities;
@@ -311,7 +363,11 @@ final class Server
                 $definition['annotations'] = $this->toolAnnotations[$name];
             }
 
-            return $definition;
+            if (isset($this->outputSchemas[$name])) {
+                $definition['outputSchema'] = $this->outputSchemas[$name]->jsonSchema();
+            }
+
+            return $definition + ($this->toolMetadata[$name] ?? []);
         }, $names);
     }
 
@@ -336,6 +392,10 @@ final class Server
         try {
             $value = $tool->call($arguments, new ToolExecutionContext($requestId, $name, $arguments));
             $output = ToolOutput::from($value);
+            if (isset($this->outputSchemas[$name])) {
+                $output = $output->validateOutput($this->outputSchemas[$name]);
+            }
+            $output->toResult();
         } catch (InvalidToolInputException|SchemaValidationException $e) {
             $output = ToolOutput::error($e->getMessage());
         } catch (Throwable $e) {
@@ -367,9 +427,86 @@ final class Server
             throw ProtocolException::invalidParams('resources/read requires a uri.');
         }
 
-        $resource = $this->resources[$uri] ?? throw ProtocolException::invalidParams("Resource not found: {$uri}");
+        if (isset($this->resources[$uri])) {
+            return $this->cacheable(['contents' => [$this->resources[$uri]->read()]]);
+        }
+        foreach ($this->templates as $template) {
+            $content = $template->read($uri);
+            if ($content !== null) {
+                return $this->cacheable(['contents' => [$content]]);
+            }
+        }
 
-        return $this->cacheable(['contents' => [$resource->read()]]);
+        throw ProtocolException::invalidParams('Resource not found.');
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function listTemplates(): array
+    {
+        $templates = $this->templates;
+        ksort($templates, SORT_STRING);
+
+        return array_values(array_map(fn(ResourceTemplate $template): array => $template->definition(), $templates));
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function listPrompts(): array
+    {
+        $prompts = $this->prompts;
+        ksort($prompts, SORT_STRING);
+
+        return array_values(array_map(fn(Prompt $prompt): array => $prompt->definition(), $prompts));
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function getPrompt(array $params): array
+    {
+        $name = $params['name'] ?? null;
+        $arguments = $params['arguments'] ?? [];
+        if (! is_string($name) || ! isset($this->prompts[$name]) || ! is_array($arguments)
+            || ($arguments !== [] && array_is_list($arguments))) {
+            throw ProtocolException::invalidParams('Unknown prompt or invalid arguments.');
+        }
+
+        return $this->cacheable($this->prompts[$name]->get($arguments));
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function complete(array $params): array
+    {
+        $ref = $params['ref'] ?? null;
+        $argument = $params['argument'] ?? null;
+        $context = $params['context'] ?? [];
+        if (! is_array($ref) || ! is_array($argument) || ! is_string($argument['name'] ?? null)
+            || ! is_string($argument['value'] ?? null) || ! is_array($context)) {
+            throw ProtocolException::invalidParams('Invalid completion request.');
+        }
+        $context = $context['arguments'] ?? [];
+        if (! is_array($context) || ($context !== [] && array_is_list($context))) {
+            throw ProtocolException::invalidParams('Invalid completion context.');
+        }
+        foreach ($context as $value) {
+            if (! is_string($value)) {
+                throw ProtocolException::invalidParams('Completion context values must be strings.');
+            }
+        }
+        $entry = match ($ref['type'] ?? null) {
+            'ref/prompt' => is_string($ref['name'] ?? null) ? ($this->prompts[$ref['name']] ?? null) : null,
+            'ref/resource' => is_string($ref['uri'] ?? null) ? ($this->templates[$ref['uri']] ?? null) : null,
+            default => null,
+        };
+        if ($entry === null) {
+            throw ProtocolException::invalidParams('Unknown completion reference.');
+        }
+        $values = $entry->complete($argument['name'], $argument['value'], $context);
+
+        return ['completion' => ['values' => array_slice($values, 0, 100), 'total' => count($values), 'hasMore' => count($values) > 100]];
     }
 
     private function error(string|int|null $id, ProtocolException $e): Reply

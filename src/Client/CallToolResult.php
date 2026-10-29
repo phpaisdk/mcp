@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace AiSdk\Mcp\Client;
 
+use AiSdk\Mcp\Exceptions\McpException;
+use AiSdk\Mcp\Support\Payload;
+
 /**
  * The outcome of tools/call.
  */
@@ -24,7 +27,12 @@ final class CallToolResult
      */
     public static function fromResult(array $result): self
     {
-        $content = is_array($result['content'] ?? null) ? array_values(array_filter($result['content'], is_array(...))) : [];
+        $content = $result['content'] ?? [];
+        if (! is_array($content) || (isset($result['isError']) && ! is_bool($result['isError']))) {
+            throw new McpException('Malformed tools/call response.');
+        }
+        Payload::content($content);
+        Payload::check($result);
 
         return new self(
             $content,

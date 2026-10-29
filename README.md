@@ -113,6 +113,52 @@ Server behaviour worth knowing:
 - Invalid tool input is returned as an execution error the model can correct. Exceptions thrown by a handler are reported generically; call `exposeToolErrors()` to include their messages.
 - The modern HTTP binding validates `Origin` (same host by default), `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` against the body, and answers `405` to `GET`/`DELETE`.
 
+## Prompts, templates and completions
+
+```php
+use AiSdk\Mcp\Server\Prompt;
+use AiSdk\Mcp\Server\ResourceTemplate;
+
+$prompt = new Prompt('review', fn (array $args): array => [
+    ['role' => 'user', 'content' => ['type' => 'text', 'text' => 'Review '.$args['language']]],
+], arguments: [['name' => 'language', 'description' => 'Source language', 'required' => true]]);
+$prompt->onComplete('language', fn (string $prefix, array $context): array => ['PHP', 'Python']);
+
+$template = new ResourceTemplate('docs://{section}/{page}', 'docs',
+    fn (array $variables, string $uri): string => $docs->read($variables['section'], $variables['page']));
+$template->onComplete('section', fn (string $prefix, array $context): array => ['guide', 'reference']);
+$server->prompt($prompt)->resourceTemplate($template);
+
+$mcp->listPrompts();
+$mcp->getPrompt('review', ['language' => 'PHP']); // description and messages
+$mcp->listResourceTemplates();
+$mcp->readResource('docs://guide/intro');
+$mcp->complete(['type' => 'ref/prompt', 'name' => 'review'], 'language', 'P');
+$mcp->complete(['type' => 'ref/resource', 'uri' => 'docs://{section}/{page}'], 'section', 'g');
+```
+
+Template matching supports RFC 6570 level 1-2 scalar variables (`{var}`, `{a,b}`, `{+path}`, `{#fragment}`). Values are percent-decoded and remain untrusted: apply your own authorization and path restrictions in the reader. Templates are limited to 4 KiB and 32 variable occurrences; URIs to 8 KiB. Exact resources take precedence over templates. Completion callbacks return a bounded list of strings; responses include at most 100 suggestions with `total` and `hasMore`. The optional fourth argument to `complete()` is the map of already resolved arguments.
+
+## Rich tool results
+
+```php
+use AiSdk\Mcp\Server\ToolOutput;
+
+$server->tool($tool, outputSchema: Schema::object('answer', properties: [
+    Schema::integer('value')->required(),
+])); // successful results must include matching structured content
+
+ToolOutput::structured(['value' => 42]); // also supplies a text fallback
+ToolOutput::image($base64Png, 'image/png');
+ToolOutput::audio($base64Wav, 'audio/wav');
+ToolOutput::resourceLink($resource);
+ToolOutput::blocks($contentBlocks)->withStructured(['value' => 42]);
+ToolOutput::text('Hello')->annotations(['audience' => ['assistant'], 'priority' => 0.8])
+    ->withMeta(['traceId' => '123']);
+```
+
+`Server::tool()` accepts optional `icons` and `meta` arguments. `TextResource::text()` accepts `annotations`, `icons` and `meta`; `Prompt` and `ResourceTemplate` accept icons and metadata too. Metadata is serialized as `_meta`. Output schemas use core's `Schema` primitives and validator; invalid or missing structured outputs become tool execution errors. Content is validated and capped at 4 MiB. Discovery and legacy initialization advertise registered capabilities, with `listChanged: false` and no resource subscriptions.
+
 ## Security
 
 MCP servers and clients handle untrusted input in both directions, so the defaults are conservative:
@@ -136,7 +182,7 @@ MCP servers and clients handle untrusted input in both directions, so the defaul
 | Transports | Streamable HTTP (client and server), stdio (client and server), in-memory |
 | Servers using the older `initialize` handshake | Opt-in `Client::legacyHttp()` for Streamable HTTP; default clients remain stateless |
 | Roots, Sampling, Logging | Deprecated by the spec; not implemented |
-| Not implemented yet | `subscriptions/listen`, prompts, the Tasks and MCP Apps extensions, OAuth discovery |
+| Not implemented yet | `subscriptions/listen`, the Tasks and MCP Apps extensions, OAuth discovery |
 
 ### Serve legacy clients
 
