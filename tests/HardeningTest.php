@@ -248,3 +248,30 @@ it('rejects a tools/list answer whose tools field is not a list', function () {
 
     expect(fn() => (new Client(new HttpTransport('https://x.test/mcp', $http, $factory, $factory)))->listTools(true))->toThrow(McpException::class, 'malformed');
 });
+
+it('skips remote tools it cannot expose safely instead of failing the whole list', function () {
+    $huge = ['type' => 'object', 'properties' => []];
+    for ($i = 0; $i < 5000; $i++) {
+        $huge['properties']["p{$i}"] = ['type' => 'string'];
+    }
+    $tools = [
+        ['name' => 'good', 'description' => 'ok', 'inputSchema' => ['type' => 'object', 'properties' => ['q' => ['type' => 'string']]]],
+        ['name' => 'bad_description', 'description' => 5, 'inputSchema' => ['type' => 'object']],
+        ['name' => 'huge', 'description' => 'big', 'inputSchema' => $huge],
+        ['name' => 'cycle', 'description' => 'loop', 'inputSchema' => ['type' => 'object', 'properties' => ['a' => ['$ref' => '#/$defs/A']], '$defs' => ['A' => ['$ref' => '#/$defs/A']]]],
+        ['name' => 'string_schema', 'description' => 'x', 'inputSchema' => 'nope'],
+    ];
+    $factory = new Psr17Factory();
+    $http = new class (json_encode(['jsonrpc' => '2.0', 'id' => 1, 'result' => ['resultType' => 'complete', 'tools' => $tools, 'ttlMs' => 0, 'cacheScope' => 'public']])) implements ClientInterface {
+        public function __construct(private readonly string $body) {}
+
+        public function sendRequest(RequestInterface $request): ResponseInterface
+        {
+            return new Response(200, ['Content-Type' => 'application/json'], $this->body);
+        }
+    };
+
+    $names = array_map(fn($tool) => $tool->name(), (new Client(new HttpTransport('https://x.test/mcp', $http, $factory, $factory)))->tools());
+
+    expect($names)->toBe(['good']);
+});

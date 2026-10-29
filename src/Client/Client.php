@@ -168,7 +168,14 @@ final class Client
                 continue;
             }
 
-            $tool = new McpTool($this, $definition, $prefix . $name);
+            try {
+                $tool = new McpTool($this, $definition, $prefix . $name);
+                // Normalize now so a hostile or oversized schema drops this tool instead of failing a run later.
+                $tool->inputSchemaForProvider();
+            } catch (McpException) {
+                continue;
+            }
+
             if ($requireApproval) {
                 $tool->needsApproval();
             }
