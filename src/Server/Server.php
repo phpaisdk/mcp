@@ -93,6 +93,10 @@ final class Server
             throw new InvalidArgumentException("MCP tool names must be 1-128 characters of A-Z, a-z, 0-9, _, - or . (got [{$name}]).");
         }
 
+        if ($tool->requiresApproval()) {
+            throw new InvalidArgumentException("Tool [{$name}] requires approval, which an MCP server cannot collect. Register it only after removing needsApproval(), or gate it in your own handler.");
+        }
+
         $this->tools[$name] = $tool;
 
         if ($annotations !== []) {

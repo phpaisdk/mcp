@@ -64,7 +64,18 @@ final class HttpHandler implements RequestHandlerInterface
             return $this->json(['jsonrpc' => '2.0', 'id' => null, 'error' => ['code' => Protocol::INVALID_REQUEST, 'message' => 'Request body too large.']], 413);
         }
 
-        $message = json_decode((string) $request->getBody(), true);
+        // Read at most one byte past the limit so a body without a declared size stays bounded.
+        $body = $request->getBody();
+        if ($body->isSeekable()) {
+            $body->rewind();
+        }
+        $raw = $body->read($this->maxBodyBytes + 1);
+
+        if (strlen($raw) > $this->maxBodyBytes) {
+            return $this->json(['jsonrpc' => '2.0', 'id' => null, 'error' => ['code' => Protocol::INVALID_REQUEST, 'message' => 'Request body too large.']], 413);
+        }
+
+        $message = json_decode($raw, true);
 
         if (! is_array($message) || array_is_list($message)) {
             $error = $message === null && json_last_error() !== JSON_ERROR_NONE

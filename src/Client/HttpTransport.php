@@ -208,7 +208,7 @@ final class HttpTransport implements Transport
                 throw new McpException("The MCP event stream exceeds the {$this->maxResponseBytes} byte limit.");
             }
 
-            $buffer .= str_replace("\r\n", "\n", $chunk);
+            $buffer = str_replace("\r\n", "\n", $buffer . $chunk);
 
             while (($end = strpos($buffer, "\n\n")) !== false) {
                 $event = substr($buffer, 0, $end);

@@ -29,6 +29,7 @@ final class StdioTransport implements Transport
      *                                           inherited (it usually holds API keys); only a minimal safe set is passed
      *                                           unless $inheritEnvironment is true.
      * @param  (callable(array<string, mixed>): void)|null  $onNotification
+     * @param  int  $maxLineBytes  Largest accepted server message; a longer line closes the process.
      */
     public function __construct(
         private readonly array $command,
@@ -37,6 +38,7 @@ final class StdioTransport implements Transport
         private readonly float $timeoutSeconds = 60.0,
         ?callable $onNotification = null,
         private readonly bool $inheritEnvironment = false,
+        private readonly int $maxLineBytes = 4_194_304,
     ) {
         $this->onNotification = $onNotification;
     }
@@ -56,6 +58,11 @@ final class StdioTransport implements Transport
             $this->close();
 
             throw new McpException('Could not write to the MCP server process; it may have exited.');
+        }
+
+        // Notifications have no response to wait for.
+        if (! array_key_exists('id', $message)) {
+            return [];
         }
 
         $deadline = microtime(true) + $this->timeoutSeconds;
@@ -182,9 +189,22 @@ final class StdioTransport implements Transport
             }
 
             $this->buffer .= $chunk;
+
+            if (strlen($this->buffer) > $this->maxLineBytes && ! str_contains($this->buffer, "\n")) {
+                $this->close();
+
+                throw new McpException("The MCP server message exceeds the {$this->maxLineBytes} byte limit.");
+            }
         }
 
         $line = substr($this->buffer, 0, $pos);
+
+        if ($pos > $this->maxLineBytes) {
+            $this->close();
+
+            throw new McpException("The MCP server message exceeds the {$this->maxLineBytes} byte limit.");
+        }
+
         $this->buffer = substr($this->buffer, $pos + 1);
 
         return $line;
