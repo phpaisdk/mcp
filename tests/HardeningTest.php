@@ -177,3 +177,26 @@ it('reassembles server-sent events split inside a CRLF pair', function () {
 
     expect($transport->send(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'])['result'])->toBe(['ok' => true]);
 });
+
+it('skips remote tool definitions with unsafe names and can require approval', function () {
+    $factory = new Psr17Factory();
+    $definitions = [
+        ['name' => 'ok_tool', 'description' => 'fine', 'inputSchema' => ['type' => 'object']],
+        ['name' => 'has space', 'description' => 'bad'],
+        ['name' => ['array'], 'description' => 'worse'],
+    ];
+    $body = json_encode(['jsonrpc' => '2.0', 'id' => 1, 'result' => ['resultType' => 'complete', 'tools' => $definitions, 'ttlMs' => 0, 'cacheScope' => 'public']]);
+    $http = new class (new Response(200, ['Content-Type' => 'application/json'], $body)) implements ClientInterface {
+        public function __construct(private readonly ResponseInterface $response) {}
+
+        public function sendRequest(RequestInterface $request): ResponseInterface
+        {
+            return $this->response;
+        }
+    };
+    $client = new Client(new HttpTransport('https://x.test/mcp', $http, $factory, $factory));
+
+    $tools = $client->tools(requireApproval: true);
+
+    expect($tools)->toHaveCount(1)->and($tools[0]->name())->toBe('ok_tool')->and($tools[0]->requiresApproval())->toBeTrue();
+});

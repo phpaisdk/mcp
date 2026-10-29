@@ -144,18 +144,31 @@ final class Client
      *
      * @param  string  $prefix  Prepended to every tool name to avoid collisions between servers.
      * @param  list<string>|null  $only  Remote tool names to include; null includes all.
+     * @param  bool  $requireApproval  Mark every remote tool as needing approval, so an Agent pauses before calling it.
      * @return list<McpTool>
      */
-    public function tools(string $prefix = '', ?array $only = null): array
+    public function tools(string $prefix = '', ?array $only = null, bool $requireApproval = false): array
     {
         $tools = [];
 
         foreach ($this->listTools() as $definition) {
-            if ($only !== null && ! in_array($definition['name'], $only, true)) {
+            // Definitions come from an untrusted server: skip entries that cannot be exposed safely.
+            $name = $definition['name'] ?? null;
+
+            if (! is_string($name) || preg_match('/^[A-Za-z0-9_.\-]{1,128}$/', $name) !== 1) {
                 continue;
             }
 
-            $tools[] = new McpTool($this, $definition, $prefix . $definition['name']);
+            if ($only !== null && ! in_array($name, $only, true)) {
+                continue;
+            }
+
+            $tool = new McpTool($this, $definition, $prefix . $name);
+            if ($requireApproval) {
+                $tool->needsApproval();
+            }
+
+            $tools[] = $tool;
         }
 
         return $tools;
