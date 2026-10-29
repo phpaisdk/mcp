@@ -119,12 +119,14 @@ MCP servers and clients handle untrusted input in both directions, so the defaul
 
 - **stdio servers do not inherit your environment.** `Client::stdio()` passes only `PATH`, `HOME` and similar basics plus the `env` you give it, because your environment usually holds API keys. Pass `inheritEnvironment: true` only for servers you fully trust.
 - **Response size limits.** The HTTP client refuses responses and event streams over 10 MiB (`maxResponseBytes`).
-- **Request size limits.** `HttpHandler` answers `413` above 1 MiB (`maxBodyBytes`), and `StdioServer` rejects lines above 4 MiB.
+- **Message size limits.** `HttpHandler` answers `413` above 1 MiB (`maxBodyBytes`), even when the body has no declared size. `StdioServer` rejects lines above 4 MiB, and the stdio client closes a server process whose message exceeds `maxLineBytes` (4 MiB).
 - **Authentication hook.** `HttpHandler` takes an `authenticator` closure that can return a `401` response before any message is processed. Always set one on a public endpoint.
 - **Origin validation** is on by default (same host), which blocks DNS-rebinding attacks from browsers.
 - **Tool errors are generic by default.** Exceptions from tool handlers are not sent to the model unless you call `exposeToolErrors()`.
 - **Redirects.** Pass a PSR-18 client with redirects disabled for MCP endpoints, so credentials in custom headers cannot follow a redirect to another host.
-- **Treat tool descriptions and results from third-party servers as untrusted input.** They can contain prompt-injection text. Prefer allow-listing tools (`$mcp->tools(only: ['search'])`) and require human approval for tools with side effects.
+- **Servers refuse approval-gated tools.** `Server::tool()` throws for a tool marked `needsApproval()`, because an MCP server cannot collect a human decision. Gate sensitive actions inside your own handler.
+- **Remote tools can require approval.** `$mcp->tools(requireApproval: true)` marks every remote tool so an `Agent` pauses before calling it. Remote tools with names outside `A-Z a-z 0-9 _ - .` are skipped.
+- **Treat tool descriptions and results from third-party servers as untrusted input.** They can contain prompt-injection text. Prefer allow-listing tools (`$mcp->tools(only: ['search'])`) and use `requireApproval: true` for tools with side effects.
 
 ## Compatibility
 
@@ -136,6 +138,10 @@ MCP servers and clients handle untrusted input in both directions, so the defaul
 | Roots, Sampling, Logging | Deprecated by the spec; not implemented |
 | Not implemented yet | `subscriptions/listen`, prompts, the Tasks and MCP Apps extensions, OAuth discovery |
 
+### Legacy HTTP servers
+
+Use `Client::legacyHttp($url, $http, $requestFactory, $streamFactory)` for initialize-based peers. It supports explicit revisions `2025-11-25` (default), `2025-06-18`, and `2025-03-26`. Initialization must return the configured version. The client sends `notifications/initialized`, preserves the session header and never automatically replays a failed tool call. Default `Client::http()` behavior is unchanged. Legacy stdio, old GET/SSE transport, server-initiated requests and automatic session recovery are not supported.
+
 ## Development
 
 ```bash
@@ -145,7 +151,3 @@ composer test:all   # pint, phpstan (level 8), pest
 ## License
 
 MIT
-
-### Upcoming 0.10.0 legacy HTTP compatibility
-
-Use `Client::legacyHttp($url, $http, $requestFactory, $streamFactory)` for initialize-based peers. It supports explicit revisions `2025-11-25` (default), `2025-06-18`, and `2025-03-26`. Initialization must return the configured version. The client sends `notifications/initialized`, preserves the session header and never automatically replays a failed tool call. Default `Client::http()` behavior is unchanged. Legacy stdio, old GET/SSE transport, server-initiated requests and automatic session recovery are not supported.
