@@ -241,6 +241,27 @@ Use `Client::legacyHttp($url, $http, $requestFactory, $streamFactory)` for initi
 composer test:all   # pint, phpstan (level 8), pest
 ```
 
+### Official MCP conformance suite (opt-in)
+
+The official [MCP conformance framework](https://github.com/modelcontextprotocol/conformance) supports server and client testing ([SDK integration guide](https://github.com/modelcontextprotocol/conformance/blob/main/SDK_INTEGRATION.md)). Node.js 22+ and npm/npx are required in addition to this package's Composer development dependencies.
+
+```bash
+composer conformance -- --scenario server-initialize
+composer conformance -- --scenario tools-list
+composer conformance                         # full upstream active server suite
+```
+
+The command starts `tests/fixtures/conformance-http.php` on `127.0.0.1:8765`, invokes the pinned stable `@modelcontextprotocol/conformance@0.1.16` tool through npx, and stops the fixture on exit. The first run downloads development tooling to npm's cache. Set `MCP_CONFORMANCE_PORT` to choose another local port. Results are written under ignored `results/` directories. Failures remain visible and return a nonzero status; no expected-failure baseline is applied.
+
+Upstream stable 0.1.16 tests initialize-based revisions and does not include the 2026-07-28 stateless scenarios. To test modern requests using upstream's currently published prerelease tooling explicitly:
+
+```bash
+MCP_CONFORMANCE_PACKAGE=@modelcontextprotocol/conformance@0.2.0-alpha.12 \
+    composer conformance -- --scenario server-stateless
+```
+
+The fixture registers the official test names for text/image/audio/embedded tool content, execution errors, text resources, templates and prompts. It does not implement the everything-server's logging, progress streams, sampling, elicitation, binary resources, subscriptions or extension fixtures; related full-suite scenarios can fail or skip. Verified locally: stable `server-initialize` and `tools-list` each pass; prerelease `server-stateless` passes 21/25 checks. Its four failures require diagnostic fixture tools (`test_missing_capability`, `test_streaming_elicitation`, `test_logging_tool`) that are not implemented here. No full-suite pass is claimed. These commands test the server role; they do not establish OAuth-client conformance or a full protocol conformance claim. Conformance is intentionally excluded from `test:all` and default CI.
+
 ## License
 
 MIT

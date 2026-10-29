@@ -57,7 +57,8 @@
             "@lint",
             "@analyze",
             "@test"
-        ]
+        ],
+        "conformance": "bash tests/conformance.sh"
     },
     "config": {
         "sort-packages": true,
