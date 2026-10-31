@@ -4,6 +4,8 @@ Notable changes to `aisdk/mcp`. Release notes are also published at https://gith
 
 ## Unreleased (v0.11.0)
 
+- Requires `aisdk/core ^0.11.0`.
+
 - Run the official MCP server conformance suite against local fixtures with the opt-in `composer conformance` command.
 
 - Publish OAuth protected-resource metadata and scope challenges, and authenticate header bearer tokens through an application-supplied verifier before parsing MCP requests.
